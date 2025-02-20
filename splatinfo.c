@@ -1,102 +1,181 @@
 #include <cjson/cJSON.h>
-#include <unistd.h>
-#include <termios.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
+#include <sys/poll.h>
 #include <sys/wait.h>
+#include <termios.h>
+#include <unistd.h>
 #include "types.h"
 
+static struct termios term;
 static struct winsize winsize;
+static Rotation rotation_data;
 
-int main(int argc, char *argv[]) {
+void
+print_anarchy_rotation(int width, int height) {
+	/* Save cursor position */
+	fwrite("\e[s", 3, sizeof(char), stdout);
+
+	/* Series */
+	printf("\e[B\e[3G\e[96mSeries\e[37m:\e[15G\e[93m%s\e[0m", rotation_data.series_mode);
+	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data.series_stage[0]], stage_str[rotation_data.series_stage[1]]);
+
+	/* Open */
+	printf("\e[2B\e[3G\e[96mOpen\e[37m:\e[15G\e[93m%s\e[0m", rotation_data.open_mode);
+	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data.open_stage[0]], stage_str[rotation_data.open_stage[1]]);
+
+	/* Load cursor position */
+	fwrite("\e[u", 3, sizeof(char), stdout);
+}
+
+void
+print_turf_x_rotation(int width, int height) {
+	/* Check width and height are greater than minimum */
+	/* TODO */
+
+	/* Calculate x coordinate of second column */
+	int mid = width / 2 + 1;
+
+	/* Save cursor position */
+	fwrite("\e[s", 3, sizeof(char), stdout);
+
+	/* Turf */
+	printf("\e[B\e[%dG\e[92mRegular\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, rotation_data.series_mode);
+	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data.series_stage[0]], mid + 4, stage_str[rotation_data.series_stage[1]]);
+
+	/* X battle */
+	printf("\e[2B\e[%dG\e[94mX Battle\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, rotation_data.open_mode);
+	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data.open_stage[0]], mid + 4, stage_str[rotation_data.open_stage[1]]);
+
+	/* Load cursor position */
+	fwrite("\e[u", 3, sizeof(char), stdout);
+}
+
+void
+print_rotation_box(int width, int height) {
+	/* Check width and height are greater than minimum */
+	/* TODO */
+
+	/* Create enough space for the whole box */
+	for (int i = 0; i < height; i++)
+		putc('\n', stdout);
+	printf("\e[%dA", height);
+
+	/* Save cursor position
+	 * (top left of rotation box) */
+	fwrite("\e[s", 3, sizeof(char), stdout);
+
+	/* Print title and top of rotation box */
+	printf("\e[91m┌─┐ Current\e[37m: \e[91m┌");
+	for (int i = 0; i < width - 15; i++)
+		printf("─");
+	printf("┐");
+
+	/* Print sides of rotation box */
+	for (int i = 0; i < height - 2; i++) {
+		printf("│\e[%dG", width);
+		printf("│\e[1G");
+		printf("\e[B\e[G");
+	}
+
+	/* Print bottom of rotation box */
+	printf("└");
+	for (int i = 0; i < width - 2; i++)
+		printf("─");
+	printf("┘");
+
+	/* Load cursor position */
+	fwrite("\e[u", 3, sizeof(char), stdout);
+}
+
+int
+main(int argc, char *argv[]) {
 	FILE *fcurloutput = fopen("/home/basil/splat-info/output-info.json", "w");
 
 	/* Initialise stuff */
+	tcgetattr(STDIN_FILENO, &term);
+	struct termios tmp = term;
+	tmp.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, 0, &tmp);
+
+	printf("\e[?25l"); // Hide cursor
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 
 	/* Start child to call curl */
-	static int fds[2];
+	int oldstdin = dup(0);
+	int fds[2];
 	pipe(fds);
-	int curl_pid = fork();
-	if (curl_pid == 0) {
+
+	if (fork() == 0) {
 		close(fds[0]);
-		dup2(fds[1], STDOUT_FILENO);
-		execvp("curl", (char *[]){ "curl", "--silent", "https://splatoon.oatmealdome.me/api/v1/three/versus/phases?count=24", NULL });
-		exit(0);
+		dup2(fds[1], 1);
+		execvp("curl", (char *[]){ "curl", "--silent", "https://splatoon.oatmealdome.me/api/v1/three/versus/phases?count=12", NULL });
+		exit(1);
 	}
 	close(fds[1]);
-	dup2(fds[0], STDIN_FILENO);
+	dup2(fds[0], 0);
 
-	static size_t len;
-	static char *curl_output;
-	wait(&curl_pid);
-	if (getline(&curl_output, &len, stdin) < 0) {
-		printf("asdf\n");
+	size_t len = 0;
+	char *curl_output = 0;
+	getdelim(&curl_output, &len, EOF, stdin);
+	clearerr(stdin);
+	dup2(oldstdin, 0);
+
+	/* Parse rotation data */
+	cJSON *curljson = cJSON_Parse(curl_output);
+	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
+	for (int i = 0; i < 1; i++) {
+		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
+		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
+		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
+		cJSON *x = cJSON_GetObjectItem(normal, "X");
+
+		/* Regular battle */
+		rotation_data.regular_mode = cJSON_GetObjectItem(regular, "rule")->valuestring;
+		rotation_data.regular_stage[0] = cJSON_GetObjectItem(regular, "stages")->child->valueint;
+		rotation_data.regular_stage[1] = cJSON_GetObjectItem(regular, "stages")->child->next->valueint;
+
+		/* Anarchy series */
+		rotation_data.series_mode = cJSON_GetObjectItem(series, "rule")->valuestring;
+		rotation_data.series_stage[0] = cJSON_GetObjectItem(series, "stages")->child->valueint;
+		rotation_data.series_stage[1] = cJSON_GetObjectItem(series, "stages")->child->next->valueint;
+
+		/* Anarchy open */
+		rotation_data.open_mode = cJSON_GetObjectItem(open, "rule")->valuestring;
+		rotation_data.open_stage[0] = cJSON_GetObjectItem(open, "stages")->child->valueint;
+		rotation_data.open_stage[1] = cJSON_GetObjectItem(open, "stages")->child->next->valueint;
+
+		/* X battle */
+		rotation_data.x_mode = cJSON_GetObjectItem(x, "rule")->valuestring;
+		rotation_data.x_stage[0] = cJSON_GetObjectItem(x, "stages")->child->valueint;
+		rotation_data.x_stage[1] = cJSON_GetObjectItem(x, "stages")->child->next->valueint;
+
+		normal = normal->next;
 	}
 
-	cJSON *full_json = cJSON_Parse(curl_output);
-	cJSON *normal = cJSON_GetObjectItem(full_json, "normal");
+	print_rotation_box(winsize.ws_col, 10);
+	print_anarchy_rotation(winsize.ws_col, 10);
+	print_turf_x_rotation(winsize.ws_col, 10);
+	fflush(stdout);
 
-	/* Regular battle */
-	cJSON *regular = cJSON_GetObjectItem(normal->child, "Regular");
-	cJSON *regular_mode = cJSON_GetObjectItem(regular, "rule");
-	cJSON *regular_stages = cJSON_GetObjectItem(regular, "stages");
+	/* Main loop */
+	static int run = 1;
+	while (run) {
+		char c = getc(stdin);
+		switch (c) {
+			case 'q':
+				run = 0;
+				break;
+			default:
+				printf("%c\n", c);
+				break;
+		}
+	}
 
-	/* Anarchy series */
-	cJSON *bankara = cJSON_GetObjectItem(normal->child, "Bankara");
-	cJSON *bankara_mode = cJSON_GetObjectItem(bankara, "rule");
-	cJSON *bankara_stages = cJSON_GetObjectItem(bankara, "stages");
-
-	/* Anarchy open */
-	cJSON *open = cJSON_GetObjectItem(normal->child, "BankaraOpen");
-	cJSON *open_mode = cJSON_GetObjectItem(open, "rule");
-	cJSON *open_stages = cJSON_GetObjectItem(open, "stages");
-
-	/* X battle */
-	cJSON *xbattle = cJSON_GetObjectItem(normal->child, "X");
-	cJSON *xbattle_mode = cJSON_GetObjectItem(xbattle, "rule");
-	cJSON *xbattle_stages = cJSON_GetObjectItem(xbattle, "stages");
-
-	/* Salmon run */
-	cJSON *salmon = cJSON_GetObjectItem(normal->child, "X");
-	cJSON *salmon_mode = cJSON_GetObjectItem(salmon, "rule");
-	cJSON *salmon_stages = cJSON_GetObjectItem(salmon, "stages");
-
-	printf("\n");
-
-	printf("\e[91mCurrent\e[37m:\n");
-	printf("    \e[96mSeries\e[37m: \e[93m%s                  \e[92mRegular\e[37m: \e[93mTurf\e[0m\n", bankara_mode->valuestring);
-	printf("        %s\e[39G%s\n", stage_str[bankara_stages->child->valueint], stage_str[regular_stages->child->valueint]);
-	printf("        %s\e[39G%s\n", stage_str[bankara_stages->child->next->valueint], stage_str[regular_stages->child->next->valueint]);
-	printf("    \e[96mOpen\e[37m: \e[93m%s                    \e[96mSalmon Run\e[37m:\e[0m\n", open_mode->valuestring);
-	printf("        %s\e[39G%s\n", stage_str[open_stages->child->valueint], stage_str[salmon_stages->child->valueint]);
-	printf("        %s\e[39G%s\n", stage_str[open_stages->child->next->valueint], stage_str[salmon_stages->child->next->valueint]);
-	printf("    \e[94mX Battle\e[37m: \e[93m%s\e[0m\n", xbattle_mode->valuestring);
-	printf("        %s\n", stage_str[xbattle_stages->child->valueint]);
-	printf("        %s\n\n", stage_str[xbattle_stages->child->next->valueint]);
-
-	/*
-	bankara = cJSON_GetObjectItem(normal->child->next, "Bankara");
-	bankara_mode = cJSON_GetObjectItem(bankara, "rule");
-	bankara_stages = cJSON_GetObjectItem(bankara, "stages");
-	open = cJSON_GetObjectItem(normal->child->next, "BankaraOpen");
-	open_mode = cJSON_GetObjectItem(open, "rule");
-	open_stages = cJSON_GetObjectItem(open, "stages");
-	xbattle = cJSON_GetObjectItem(normal->child->next, "X");
-	xbattle_mode = cJSON_GetObjectItem(xbattle, "rule");
-	xbattle_stages = cJSON_GetObjectItem(xbattle, "stages");
-
-	printf("\e[95mNext\e[37m:\n");
-	printf("    \e[96mSeries\e[37m: \e[93m%s\e[0m\n        %s\n        %s\n\n", bankara_mode->valuestring, stage_str[bankara_stages->child->valueint], stage_str[bankara_stages->child->next->valueint]);
-	printf("    \e[96mOpen\e[37m: \e[93m%s\e[0m\n        %s\n        %s\n\n", open_mode->valuestring, stage_str[open_stages->child->valueint], stage_str[open_stages->child->next->valueint]);
-	printf("    \e[94mX Battle\e[37m: \e[93m%s\e[0m\n        %s\n        %s\n\n", xbattle_mode->valuestring, stage_str[xbattle_stages->child->valueint], stage_str[xbattle_stages->child->next->valueint]);
-
-	printf("\e[92mFuture\e[37m:\n");
-	printf("   \e[96mSeries\e[37m:              \e[93m%s\e[0m\n      %s\n      %s\n\n", bankara_mode->valuestring, stage_str[bankara_stages->child->valueint], stage_str[bankara_stages->child->next->valueint]);
-	printf("   \e[96mOpen\e[37m:                \e[93m%s\e[0m\n      %s\n      %s\n\n", open_mode->valuestring, stage_str[open_stages->child->valueint], stage_str[open_stages->child->next->valueint]);
-	printf("   \e[94mX Battle\e[37m:            \e[93m%s\e[0m\n      %s\n      %s\n\n", xbattle_mode->valuestring, stage_str[xbattle_stages->child->valueint], stage_str[xbattle_stages->child->next->valueint]);
-	*/
+	printf("\e[?25h\n"); // Show cursor
+	tcsetattr(STDIN_FILENO, 0, &term);
 
 	return 0;
 }
