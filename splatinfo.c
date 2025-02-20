@@ -176,7 +176,7 @@ main(int argc, char *argv[]) {
 	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
 	if (curljson == NULL) printf("Failed to parse curl output\n");
 	if (normal == NULL) printf("Failed to get object item \"normal\"\n");
-	for (int i = 0; i < 12; i++) {
+	for (int i = 0; i < 11; i++) {
 		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
 		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
 		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
@@ -217,7 +217,7 @@ main(int argc, char *argv[]) {
 		char c = getc(stdin);
 		switch (c) {
 			case 'j':
-				if (idx < 12 - rows)
+				if (idx < 11 - rows)
 					idx++;
 				break;
 			case 'k':
