@@ -54,7 +54,7 @@ print_turf_x_rotation(int width, int idx) {
 }
 
 void
-print_rotation_box(int width, int idx, int row) {
+print_rotation_box(int width, int idx, int row, int starttime) {
 	/* Check width and height are greater than minimum */
 	/* TODO */
 
@@ -87,10 +87,16 @@ print_rotation_box(int width, int idx, int row) {
 			break;
 	}
 
+	int timestrlen = 16;
+	if (starttime >= 8) timestrlen++;
+	if (starttime >= 10) timestrlen++;
 	printf("\e[9%dm┌─┐ %s\e[37m: \e[9%dm┌", boxcolour, titlestr, boxcolour);
-	for (int i = 0; i < width - 8 - strlen(titlestr); i++)
+	for (int i = 0; i < width - 8 - timestrlen - strlen(titlestr); i++)
 		printf("─");
-	printf("┐");
+	if (idx == 0)
+		printf("┐ \e[97m%d:00 \e[37m- \e[97m%d:00 \e[9%dm┌─┐", starttime, starttime + 2, boxcolour);
+	else
+		printf("┐ \e[37m%d:00 - %d:00 \e[9%dm┌─┐", starttime, starttime + 2, boxcolour);
 
 	/* Print sides of rotation box */
 	for (int i = 0; i < 8; i++) {
@@ -174,9 +180,12 @@ main(int argc, char *argv[]) {
 	/* Parse rotation data */
 	cJSON *curljson = cJSON_Parse(curl_output);
 	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
-	if (curljson == NULL) printf("Failed to parse curl output\n");
-	if (normal == NULL) printf("Failed to get object item \"normal\"\n");
-	for (int i = 0; i < 11; i++) {
+
+	static int starthour;
+	char *starttime = cJSON_GetObjectItem(normal, "startTime")->valuestring;
+	starthour = (starttime[11] - '0') * 10 + (starttime[12] - '0');
+
+	for (int i = 0; i < 12; i++) {
 		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
 		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
 		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
@@ -202,11 +211,13 @@ main(int argc, char *argv[]) {
 		rotation_data[i].x_stage[0] = cJSON_GetObjectItem(x, "stages")->child->valueint;
 		rotation_data[i].x_stage[1] = cJSON_GetObjectItem(x, "stages")->child->next->valueint;
 
+		if (normal->next == NULL)
+			break;
 		normal = normal->next;
 	}
 
 	for (int i = 0; i < rows; i++) {
-		print_rotation_box(winsize.ws_col, i, i);
+		print_rotation_box(winsize.ws_col, i, i, i * 2 + starthour);
 	}
 	fflush(stdout);
 
@@ -217,7 +228,7 @@ main(int argc, char *argv[]) {
 		char c = getc(stdin);
 		switch (c) {
 			case 'j':
-				if (idx < 11 - rows)
+				if (idx < 12 - rows)
 					idx++;
 				break;
 			case 'k':
@@ -232,7 +243,7 @@ main(int argc, char *argv[]) {
 		}
 
 		for (int i = 0; i < rows; i++) {
-			print_rotation_box(winsize.ws_col, idx + i, i);
+			print_rotation_box(winsize.ws_col, idx + i, i, (idx + i) * 2 + starthour);
 		}
 		fflush(stdout);
 	}
