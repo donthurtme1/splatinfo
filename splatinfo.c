@@ -6,6 +6,7 @@
 #include <sys/poll.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include "types.h"
 
@@ -13,17 +14,102 @@ static struct termios term;
 static struct winsize winsize;
 static Rotation rotation_data[12];
 
+static const MapMode fav_stages[] = {
+	{ MAHI_MAHI_RESORT, AREA },
+	{ ROBO_ROM_EN, AREA },
+	{ MAKOMART, AREA },
+	{ ROBO_ROM_EN, CLAM },
+	{ ROBO_ROM_EN, LIFT },
+	{ ROBO_ROM_EN, RAIN },
+};
+
+static inline enum mode
+str_to_mode_enum(const char *mode) {
+	if (strcmp(mode, "Paint") == 0)
+		return TURF;
+	if (strcmp(mode, "Goal") == 0)
+		return RAIN;
+	if (strcmp(mode, "Area") == 0)
+		return AREA;
+	if (strcmp(mode, "Lift") == 0)
+		return LIFT;
+	if (strcmp(mode, "Clam") == 0)
+		return CLAM;
+
+	return 0;
+}
+
+void
+fill_rotation_structs(Rotation *restrict rotation_array, int *starthour) {
+	/* Start child to call curl */
+	int oldstdin = dup(0);
+	int fds[2];
+	pipe(fds);
+
+	if (fork() == 0) {
+		close(fds[0]);
+		dup2(fds[1], 1);
+		execvp("curl", (char *[]){ "curl", "--silent", "https://splatoon.oatmealdome.me/api/v1/three/versus/phases?count=12", NULL });
+		exit(1);
+	}
+	close(fds[1]);
+	dup2(fds[0], 0);
+
+	size_t len = 0;
+	char *curl_output = 0;
+	getdelim(&curl_output, &len, EOF, stdin);
+	clearerr(stdin);
+	dup2(oldstdin, 0);
+
+	/* Parse rotation data */
+	cJSON *curljson = cJSON_Parse(curl_output);
+	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
+	char *starttime = cJSON_GetObjectItem(normal, "startTime")->valuestring;
+	*starthour = (starttime[11] - '0') * 10 + (starttime[12] - '0');
+
+	for (int i = 0; i < 12; i++) {
+		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
+		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
+		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
+		cJSON *x = cJSON_GetObjectItem(normal, "X");
+
+		/* Regular battle */
+		rotation_data[i].regular_mode = str_to_mode_enum(cJSON_GetObjectItem(regular, "rule")->valuestring);
+		rotation_data[i].regular_stage[0] = cJSON_GetObjectItem(regular, "stages")->child->valueint;
+		rotation_data[i].regular_stage[1] = cJSON_GetObjectItem(regular, "stages")->child->next->valueint;
+
+		/* Anarchy series */
+		rotation_data[i].series_mode = str_to_mode_enum(cJSON_GetObjectItem(series, "rule")->valuestring);
+		rotation_data[i].series_stage[0] = cJSON_GetObjectItem(series, "stages")->child->valueint;
+		rotation_data[i].series_stage[1] = cJSON_GetObjectItem(series, "stages")->child->next->valueint;
+
+		/* Anarchy open */
+		rotation_data[i].open_mode = str_to_mode_enum(cJSON_GetObjectItem(open, "rule")->valuestring);
+		rotation_data[i].open_stage[0] = cJSON_GetObjectItem(open, "stages")->child->valueint;
+		rotation_data[i].open_stage[1] = cJSON_GetObjectItem(open, "stages")->child->next->valueint;
+
+		/* X battle */
+		rotation_data[i].x_mode = str_to_mode_enum(cJSON_GetObjectItem(x, "rule")->valuestring);
+		rotation_data[i].x_stage[0] = cJSON_GetObjectItem(x, "stages")->child->valueint;
+		rotation_data[i].x_stage[1] = cJSON_GetObjectItem(x, "stages")->child->next->valueint;
+
+		if (normal->next == NULL)
+			break;
+		normal = normal->next;
+	}
+}
+
 void
 print_anarchy_rotation(int width, int idx) {
 	/* Save cursor position */
 	fwrite("\e[s", 3, sizeof(char), stdout);
 
 	/* Series */
-	printf("\e[B\e[3G\e[96mSeries\e[37m:\e[15G\e[93m%s\e[0m", rotation_data[idx].series_mode);
+	printf("\e[B\e[3G\e[96mSeries\e[37m:\e[15G\e[93m%s\e[0m", mode_str[rotation_data[idx].series_mode]);
 	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data[idx].series_stage[0]], stage_str[rotation_data[idx].series_stage[1]]);
 
 	/* Open */
-	printf("\e[2B\e[3G\e[96mOpen\e[37m:\e[15G\e[93m%s\e[0m", rotation_data[idx].open_mode);
+	printf("\e[2B\e[3G\e[96mOpen\e[37m:\e[15G\e[93m%s\e[0m", mode_str[rotation_data[idx].open_mode]);
 	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data[idx].open_stage[0]], stage_str[rotation_data[idx].open_stage[1]]);
 
 	/* Load cursor position */
@@ -42,11 +128,11 @@ print_turf_x_rotation(int width, int idx) {
 	fwrite("\e[s", 3, sizeof(char), stdout);
 
 	/* Turf */
-	printf("\e[B\e[%dG\e[92mRegular\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, rotation_data[idx].regular_mode);
+	printf("\e[B\e[%dG\e[92mRegular\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, mode_str[rotation_data[idx].regular_mode]);
 	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data[idx].regular_stage[0]], mid + 4, stage_str[rotation_data[idx].regular_stage[1]]);
 
 	/* X battle */
-	printf("\e[2B\e[%dG\e[94mX Battle\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, rotation_data[idx].x_mode);
+	printf("\e[2B\e[%dG\e[94mX Battle\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, mode_str[rotation_data[idx].x_mode]);
 	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data[idx].x_stage[0]], mid + 4, stage_str[rotation_data[idx].x_stage[1]]);
 
 	/* Load cursor position */
@@ -88,15 +174,17 @@ print_rotation_box(int width, int idx, int row, int starttime) {
 	}
 
 	int timestrlen = 16;
+	starttime %= 24;
 	if (starttime >= 8) timestrlen++;
 	if (starttime >= 10) timestrlen++;
+	if (starttime >= 22) timestrlen--;
 	printf("\e[9%dm┌─┐ %s\e[37m: \e[9%dm┌", boxcolour, titlestr, boxcolour);
 	for (int i = 0; i < width - 8 - timestrlen - strlen(titlestr); i++)
 		printf("─");
 	if (idx == 0)
-		printf("┐ \e[97m%d:00 \e[37m- \e[97m%d:00 \e[9%dm┌─┐", starttime, starttime + 2, boxcolour);
+		printf("┐ \e[97m%d:00 \e[37m- \e[97m%d:00 \e[9%dm┌─┐", starttime, (starttime + 2) % 24, boxcolour);
 	else
-		printf("┐ \e[37m%d:00 - %d:00 \e[9%dm┌─┐", starttime, starttime + 2, boxcolour);
+		printf("┐ \e[37m%d:00 - %d:00 \e[9%dm┌─┐", starttime, (starttime + 2) % 24, boxcolour);
 
 	/* Print sides of rotation box */
 	for (int i = 0; i < 8; i++) {
@@ -157,89 +245,50 @@ main(int argc, char *argv[]) {
 	printf("\e[?25l"); // Hide cursor
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 
-	/* Start child to call curl */
-	int oldstdin = dup(0);
-	int fds[2];
-	pipe(fds);
-
-	if (fork() == 0) {
-		close(fds[0]);
-		dup2(fds[1], 1);
-		execvp("curl", (char *[]){ "curl", "--silent", "https://splatoon.oatmealdome.me/api/v1/three/versus/phases?count=12", NULL });
-		exit(1);
-	}
-	close(fds[1]);
-	dup2(fds[0], 0);
-
-	size_t len = 0;
-	char *curl_output = 0;
-	getdelim(&curl_output, &len, EOF, stdin);
-	clearerr(stdin);
-	dup2(oldstdin, 0);
-
 	/* Parse rotation data */
-	cJSON *curljson = cJSON_Parse(curl_output);
-	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
-
 	static int starthour;
-	char *starttime = cJSON_GetObjectItem(normal, "startTime")->valuestring;
-	starthour = (starttime[11] - '0') * 10 + (starttime[12] - '0');
+	fill_rotation_structs(rotation_data, &starthour);
 
-	for (int i = 0; i < 12; i++) {
-		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
-		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
-		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
-		cJSON *x = cJSON_GetObjectItem(normal, "X");
+	/* Main loop */
+	time_t timer = time(NULL);
+	struct tm *tm_struct = gmtime(&timer);
 
-		/* Regular battle */
-		rotation_data[i].regular_mode = cJSON_GetObjectItem(regular, "rule")->valuestring;
-		rotation_data[i].regular_stage[0] = cJSON_GetObjectItem(regular, "stages")->child->valueint;
-		rotation_data[i].regular_stage[1] = cJSON_GetObjectItem(regular, "stages")->child->next->valueint;
-
-		/* Anarchy series */
-		rotation_data[i].series_mode = cJSON_GetObjectItem(series, "rule")->valuestring;
-		rotation_data[i].series_stage[0] = cJSON_GetObjectItem(series, "stages")->child->valueint;
-		rotation_data[i].series_stage[1] = cJSON_GetObjectItem(series, "stages")->child->next->valueint;
-
-		/* Anarchy open */
-		rotation_data[i].open_mode = cJSON_GetObjectItem(open, "rule")->valuestring;
-		rotation_data[i].open_stage[0] = cJSON_GetObjectItem(open, "stages")->child->valueint;
-		rotation_data[i].open_stage[1] = cJSON_GetObjectItem(open, "stages")->child->next->valueint;
-
-		/* X battle */
-		rotation_data[i].x_mode = cJSON_GetObjectItem(x, "rule")->valuestring;
-		rotation_data[i].x_stage[0] = cJSON_GetObjectItem(x, "stages")->child->valueint;
-		rotation_data[i].x_stage[1] = cJSON_GetObjectItem(x, "stages")->child->next->valueint;
-
-		if (normal->next == NULL)
-			break;
-		normal = normal->next;
-	}
+	int secs = 60 - tm_struct->tm_sec;
+	int mins = 59 - tm_struct->tm_min;
+	time_t waittime = (secs * 1000) + (mins * 60000); // millisecs
 
 	for (int i = 0; i < rows; i++) {
 		print_rotation_box(winsize.ws_col, i, i, i * 2 + starthour);
 	}
 	fflush(stdout);
 
-	/* Main loop */
 	static int idx = 0;
 	static int run = 1;
 	while (run) {
-		char c = getc(stdin);
-		switch (c) {
-			case 'j':
-				if (idx < 12 - rows)
-					idx++;
-				break;
-			case 'k':
-				if (idx > 0)
-					idx--;
-				break;
-			case 'q':
-				run = 0;
-				break;
-			default:
-				break;
+		static struct pollfd pollfds = { .fd = STDIN_FILENO, .events = POLLIN };
+		int polret = poll(&pollfds, 1, waittime);
+		if (polret > 0) {
+			register char c = getc(stdin);
+			switch (c) {
+				case 'j':
+					if (idx < 12 - rows)
+						idx++;
+					break;
+				case 'k':
+					if (idx > 0)
+						idx--;
+					break;
+				case 'q':
+					run = 0;
+					break;
+				default:
+					break;
+			}
+		} else if (polret == 0) {
+			fill_rotation_structs(rotation_data, &starthour);
+			waittime = 900000; // Check every 15 minutes
+		} else {
+			perror("poll");
 		}
 
 		for (int i = 0; i < rows; i++) {

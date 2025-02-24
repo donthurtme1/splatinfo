@@ -5,7 +5,7 @@ enum mode {
 	TURF = 1,
 	RAIN = 2,
 	AREA = 3,
-	TOWER = 4,
+	LIFT = 4,
 	CLAM = 5,
 	TRICOLOR = 6
 };
@@ -37,6 +37,16 @@ enum stage {
 	LEMIURA_HUB
 };
 
+static const char *mode_str[] = {
+	"(null)",
+	"Turf",
+	"Rain",
+	"Zones",
+	"Tower",
+	"Clams",
+	"Tricolor"
+};
+
 static const char *stage_str[] = {
 	"(null)",
 	"Scorch Gorge",
@@ -66,14 +76,19 @@ static const char *stage_str[] = {
 };
 
 typedef struct {
-	char * regular_mode;
+	enum mode regular_mode;
 	enum stage regular_stage[2];
-	char * series_mode;
+	enum mode series_mode;
 	enum stage series_stage[2];
-	char * open_mode;
+	enum mode open_mode;
 	enum stage open_stage[2];
-	char * x_mode;
+	enum mode x_mode;
 	enum stage x_stage[2];
 } Rotation;
+
+typedef struct {
+	enum stage map;
+	enum mode mode;
+} MapMode;
 
 #endif
