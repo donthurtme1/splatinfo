@@ -249,6 +249,11 @@ main(int argc, char *argv[]) {
 	static int starthour;
 	fill_rotation_structs(rotation_data, &starthour);
 
+	for (int i = 0; i < rows; i++) {
+		print_rotation_box(winsize.ws_col, i, i, i * 2 + starthour);
+	}
+	fflush(stdout);
+
 	/* Main loop */
 	time_t timer = time(NULL);
 	struct tm *tm_struct = gmtime(&timer);
@@ -256,11 +261,6 @@ main(int argc, char *argv[]) {
 	int secs = 60 - tm_struct->tm_sec;
 	int mins = 59 - tm_struct->tm_min;
 	time_t waittime = (secs * 1000) + (mins * 60000); // millisecs
-
-	for (int i = 0; i < rows; i++) {
-		print_rotation_box(winsize.ws_col, i, i, i * 2 + starthour);
-	}
-	fflush(stdout);
 
 	static int idx = 0;
 	static int run = 1;
