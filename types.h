@@ -3,11 +3,11 @@
 
 enum mode {
 	TURF = 1,
-	RAIN = 2,
-	AREA = 3,
-	LIFT = 4,
-	CLAM = 5,
-	TRICOLOR = 6
+	RAIN,
+	AREA,
+	LIFT,
+	CLAM,
+	TRICOLOR
 };
 
 enum stage {
@@ -87,8 +87,8 @@ typedef struct {
 } Rotation;
 
 typedef struct {
-	enum stage map;
 	enum mode mode;
+	enum stage map;
 } MapMode;
 
 #endif

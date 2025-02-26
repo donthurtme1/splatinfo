@@ -15,26 +15,62 @@ static struct winsize winsize;
 static Rotation rotation_data[12];
 
 static const MapMode fav_stages[] = {
-	{ MAHI_MAHI_RESORT, AREA },
-	{ ROBO_ROM_EN, AREA },
-	{ MAKOMART, AREA },
-	{ ROBO_ROM_EN, CLAM },
-	{ ROBO_ROM_EN, LIFT },
-	{ ROBO_ROM_EN, RAIN },
+	/* Zones */
+	{ AREA, UMAMI_RUINS },
+	{ AREA, FLOUNDER_HEIGHTS },
+	{ AREA, MUSEUM_D_ALFONSINO },
+	{ AREA, MAHI_MAHI_RESORT },
+	{ AREA, INKBLOT_ART_ACADEMY },
+	{ AREA, STURGEON_SHIPYARD },
+	{ AREA, MAKOMART },
+	{ AREA, WAHOO_WORLD },
+	{ AREA, CRABLEG_CAPITAL },
+	{ AREA, ROBO_ROM_EN },
+	{ AREA, MARLIN_AIRPORT },
+
+	/* Clams */
+	{ CLAM, UMAMI_RUINS },
+	{ CLAM, MUSEUM_D_ALFONSINO },
+	{ CLAM, INKBLOT_ART_ACADEMY },
+	{ CLAM, STURGEON_SHIPYARD },
+	{ CLAM, MAKOMART },
+	{ CLAM, MANTA_MARIA },
+	{ CLAM, CRABLEG_CAPITAL },
+	{ CLAM, SHIPSHAPE_CARGO_CO },
+	{ CLAM, ROBO_ROM_EN },
+	{ CLAM, MARLIN_AIRPORT },
+
+	/* Tower */
+	{ LIFT, HAGGLEFISH_MARKET },
+	{ LIFT, MUSEUM_D_ALFONSINO },
+	{ LIFT, INKBLOT_ART_ACADEMY },
+	{ LIFT, MAKOMART },
+	{ LIFT, ROBO_ROM_EN },
+	{ LIFT, MARLIN_AIRPORT },
+
+	/* Rain */
+	{ RAIN, UNDERTOW_SPILLWAY },
+	{ RAIN, MUSEUM_D_ALFONSINO },
+	{ RAIN, MAKOMART },
+	{ RAIN, ROBO_ROM_EN },
 };
 
 static inline enum mode
 str_to_mode_enum(const char *mode) {
-	if (strcmp(mode, "Paint") == 0)
-		return TURF;
-	if (strcmp(mode, "Goal") == 0)
-		return RAIN;
-	if (strcmp(mode, "Area") == 0)
-		return AREA;
-	if (strcmp(mode, "Lift") == 0)
-		return LIFT;
-	if (strcmp(mode, "Clam") == 0)
-		return CLAM;
+	switch (mode[0]) {
+		case 'P':
+			return TURF;
+		case 'R':
+			return RAIN;
+		case 'A':
+			return AREA;
+		case 'L':
+			return LIFT;
+		case 'C':
+			return CLAM;
+		default:
+			__builtin_unreachable();
+	}
 
 	return 0;
 }
@@ -105,12 +141,36 @@ print_anarchy_rotation(int width, int idx) {
 	fwrite("\e[s", 3, sizeof(char), stdout);
 
 	/* Series */
+	int isfav[2] = { 0, 0 };
 	printf("\e[B\e[3G\e[96mSeries\e[37m:\e[15G\e[93m%s\e[0m", mode_str[rotation_data[idx].series_mode]);
-	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data[idx].series_stage[0]], stage_str[rotation_data[idx].series_stage[1]]);
+	for (int i = 0; i < sizeof fav_stages; i++) {
+		if (rotation_data[idx].series_mode != fav_stages[i].mode)
+			continue;
+
+		if (rotation_data[idx].series_stage[0] == fav_stages[i].map)
+			isfav[0] = 1;
+		if (rotation_data[idx].series_stage[1] == fav_stages[i].map)
+			isfav[1] = 1;
+		if (isfav[0] & isfav[1])
+			break;
+	}
+	printf("\e[B\e[5G%c %s\e[B\e[5G%c %s", isfav[0] ? '*' : ' ', stage_str[rotation_data[idx].series_stage[0]], isfav[1] ? '*' : ' ', stage_str[rotation_data[idx].series_stage[1]]);
 
 	/* Open */
+	memset(isfav, 0, sizeof isfav);
 	printf("\e[2B\e[3G\e[96mOpen\e[37m:\e[15G\e[93m%s\e[0m", mode_str[rotation_data[idx].open_mode]);
-	printf("\e[B\e[7G%s\e[B\e[7G%s", stage_str[rotation_data[idx].open_stage[0]], stage_str[rotation_data[idx].open_stage[1]]);
+	for (int i = 0; i < sizeof fav_stages; i++) {
+		if (rotation_data[idx].open_mode != fav_stages[i].mode)
+			continue;
+
+		if (rotation_data[idx].open_stage[0] == fav_stages[i].map)
+			isfav[0] = 1;
+		if (rotation_data[idx].open_stage[1] == fav_stages[i].map)
+			isfav[1] = 1;
+		if (isfav[0] & isfav[1])
+			break;
+	}
+	printf("\e[B\e[5G%c %s\e[B\e[5G%c %s", isfav[0] ? '*' : ' ', stage_str[rotation_data[idx].open_stage[0]], isfav[1] ? '*' : ' ', stage_str[rotation_data[idx].open_stage[1]]);
 
 	/* Load cursor position */
 	fwrite("\e[u", 3, sizeof(char), stdout);
@@ -132,8 +192,20 @@ print_turf_x_rotation(int width, int idx) {
 	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data[idx].regular_stage[0]], mid + 4, stage_str[rotation_data[idx].regular_stage[1]]);
 
 	/* X battle */
+	int isfav[2] = { 0, 0 };
 	printf("\e[2B\e[%dG\e[94mX Battle\e[37m:\e[%dG\e[93m%s\e[0m", mid, mid + 12, mode_str[rotation_data[idx].x_mode]);
-	printf("\e[B\e[%dG%s\e[B\e[%dG%s", mid + 4, stage_str[rotation_data[idx].x_stage[0]], mid + 4, stage_str[rotation_data[idx].x_stage[1]]);
+	for (int i = 0; i < sizeof fav_stages; i++) {
+		if (rotation_data[idx].x_mode != fav_stages[i].mode)
+			continue;
+
+		if (rotation_data[idx].x_stage[0] == fav_stages[i].map)
+			isfav[0] = 1;
+		if (rotation_data[idx].x_stage[1] == fav_stages[i].map)
+			isfav[1] = 1;
+		if (isfav[0] & isfav[1])
+			break;
+	}
+	printf("\e[B\e[%dG%c %s\e[B\e[%dG%c %s", mid + 2, isfav[0] ? '*' : ' ', stage_str[rotation_data[idx].x_stage[0]], mid + 2, isfav[1] ? '*' : ' ', stage_str[rotation_data[idx].x_stage[1]]);
 
 	/* Load cursor position */
 	fwrite("\e[u", 3, sizeof(char), stdout);
@@ -255,12 +327,8 @@ main(int argc, char *argv[]) {
 	fflush(stdout);
 
 	/* Main loop */
-	time_t timer = time(NULL);
-	struct tm *tm_struct = gmtime(&timer);
-
-	int secs = 60 - tm_struct->tm_sec;
-	int mins = 59 - tm_struct->tm_min;
-	time_t waittime = (secs * 1000) + (mins * 60000); // millisecs
+	time_t unixtime = time(NULL);
+	int waittime = ((unixtime + 3600 % 3600) - unixtime) * 1000;
 
 	static int idx = 0;
 	static int run = 1;
