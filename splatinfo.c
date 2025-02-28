@@ -1,4 +1,5 @@
 #include <cjson/cJSON.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,9 @@
 
 static struct termios term;
 static struct winsize winsize;
+
 static Rotation rotation_data[12];
+static List *r_head;
 
 static const MapMode fav_stages[] = {
 	/* Zones */
@@ -38,7 +41,6 @@ static const MapMode fav_stages[] = {
 	{ CLAM, CRABLEG_CAPITAL },
 	{ CLAM, SHIPSHAPE_CARGO_CO },
 	{ CLAM, ROBO_ROM_EN },
-	{ CLAM, MARLIN_AIRPORT },
 
 	/* Tower */
 	{ LIFT, HAGGLEFISH_MARKET },
@@ -75,13 +77,123 @@ str_to_mode_enum(const char *mode) {
 	return 0;
 }
 
+/* Populate structs pointed to by `rotations` with up to 12 rotations from oatmealdome.me */
+int
+initrotations(int *starthour) {
+	/* Query oatmealdome using curl */
+	int oldstdin = dup(0);
+	int fds[2];
+	pipe(fds);
+	if (fork() == 0) {
+		close(fds[0]);
+		dup2(fds[1], 1);
+		execvp("curl", (char *[]){ "curl", "--silent", "https://splatoon.oatmealdome.me/api/v1/three/versus/phases?count=12", NULL });
+		exit(1);
+	}
+	close(fds[1]);
+	dup2(fds[0], 0);
+
+	/* Read data */
+	size_t len = 0;
+	char *curl_output = 0;
+	getdelim(&curl_output, &len, EOF, stdin);
+	clearerr(stdin);
+	dup2(oldstdin, 0);
+
+	/* Parse data */
+	cJSON *curljson = cJSON_Parse(curl_output);
+	if (curljson == NULL)
+		return -1;
+	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
+	char *starttime = cJSON_GetObjectItem(normal, "startTime")->valuestring;
+	*starthour = (starttime[11] - '0') * 10 + (starttime[12] - '0'); // Put current rotation's start time into starthour
+
+	/* Initialise struct list */
+	r_head = (List *)&rotation_data[0].list;
+	for (int i = 1; i < 11; i++) {
+		rotation_data[i].list.next = &rotation_data[i + 1].list;
+	}
+	rotation_data[11].list.next = r_head;
+
+	/* Put data into rotation structs */
+	list_for_each(rotation, Rotation, r_head, list) {
+		cJSON *regular = cJSON_GetObjectItem(normal, "Regular");
+		cJSON *series = cJSON_GetObjectItem(normal, "Bankara");
+		cJSON *open = cJSON_GetObjectItem(normal, "BankaraOpen");
+		cJSON *x = cJSON_GetObjectItem(normal, "X");
+
+		/* Regular battle */
+		rotation->regular_mode = str_to_mode_enum(cJSON_GetObjectItem(regular, "rule")->valuestring);
+		rotation->regular_stage[0] = cJSON_GetObjectItem(regular, "stages")->child->valueint;
+		rotation->regular_stage[1] = cJSON_GetObjectItem(regular, "stages")->child->next->valueint;
+
+		/* Anarchy series */
+		rotation->series_mode = str_to_mode_enum(cJSON_GetObjectItem(series, "rule")->valuestring);
+		rotation->series_stage[0] = cJSON_GetObjectItem(series, "stages")->child->valueint;
+		rotation->series_stage[1] = cJSON_GetObjectItem(series, "stages")->child->next->valueint;
+
+		/* Anarchy open */
+		rotation->open_mode = str_to_mode_enum(cJSON_GetObjectItem(open, "rule")->valuestring);
+		rotation->open_stage[0] = cJSON_GetObjectItem(open, "stages")->child->valueint;
+		rotation->open_stage[1] = cJSON_GetObjectItem(open, "stages")->child->next->valueint;
+
+		/* X battle */
+		rotation->x_mode = str_to_mode_enum(cJSON_GetObjectItem(x, "rule")->valuestring);
+		rotation->x_stage[0] = cJSON_GetObjectItem(x, "stages")->child->valueint;
+		rotation->x_stage[1] = cJSON_GetObjectItem(x, "stages")->child->next->valueint;
+
+		if (normal->next == NULL)
+			break;
+		normal = normal->next;
+	}
+
+	return 0;
+}
+
+/* [67bf58f8fe7e2087xxxxxxxx]  <- whole phaseid
+ *                  ^~~~~~~~
+ * This is the number stored in phaseid */
+int
+newrotation(uint32_t phaseid) {
+	int phaseid_len = 8 - (__builtin_clz(phaseid) >> 4); /* Length in nibbles */
+	char *query_str = malloc(sizeof "https://splatoon.oatmealdome.me/api/v1/three/versus/phase/normal/67bf58f8fe7e2087" + phaseid_len);
+	for (int i = 81 + phaseid_len; i > 81; i--) { /* Convert `phaseid` to a string appended to `query_str` */
+		if ((phaseid & 0x0000000f) >= 0 && (phaseid & 0x0000000f) <= 9) {
+			query_str[i] = (phaseid & 0x0000000f) + '0';
+			phaseid >>= 4;
+		} else {
+			query_str[i] = (phaseid & 0x0000000f) + 'a';
+			phaseid >>= 4;
+		}
+	}
+	query_str[81 + phaseid_len] = '\0'; /* Append null terminator */
+
+	/* Query oatmealdome using curl */
+	int oldstdin = dup(0);
+	int fds[2];
+	pipe(fds);
+	if (fork() == 0) {
+		close(fds[0]);
+		dup2(fds[1], 1);
+		execvp("curl", (char *[]){ "curl", "--silent", query_str, NULL });
+		exit(1);
+	}
+	close(fds[1]);
+	dup2(fds[0], 0);
+
+	/* Move rotation head */
+	r_head = r_head->next;
+
+	return 0;
+}
+
 void
 fill_rotation_structs(Rotation *restrict rotation_array, int *starthour) {
 	/* Start child to call curl */
 	int oldstdin = dup(0);
 	int fds[2];
+query_oatmeal:
 	pipe(fds);
-
 	if (fork() == 0) {
 		close(fds[0]);
 		dup2(fds[1], 1);
@@ -99,6 +211,14 @@ fill_rotation_structs(Rotation *restrict rotation_array, int *starthour) {
 
 	/* Parse rotation data */
 	cJSON *curljson = cJSON_Parse(curl_output);
+	if (curljson == NULL) {
+		static int tried = 0;
+		if (tried > 5)
+			return;
+		/* Try again */
+		tried++;
+		goto query_oatmeal;
+	}
 	cJSON *normal = cJSON_GetObjectItem(curljson, "normal")->child;
 	char *starttime = cJSON_GetObjectItem(normal, "startTime")->valuestring;
 	*starthour = (starttime[11] - '0') * 10 + (starttime[12] - '0');
@@ -365,7 +485,7 @@ main(int argc, char *argv[]) {
 		fflush(stdout);
 	}
 
-	printf("\e[%dB", rows * 9 + 1);
+	printf("\e[%dB", rows * 10 - 1);
 	printf("\e[?25h\n"); // Show cursor
 	tcsetattr(STDIN_FILENO, 0, &term);
 

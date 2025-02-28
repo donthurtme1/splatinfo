@@ -75,7 +75,20 @@ static const char *stage_str[] = {
 	"Lemiura Hub"
 };
 
+#define container_of(ptr, type, member) \
+	(type *)((char *)ptr - offsetof(type, member))
+
+#define list_for_each(pos, type, head, member) \
+	for (type *pos = container_of((head)->next, type, member); \
+		 &pos->member != head; \
+		 pos = container_of(pos->member.next, type, member))
+
+typedef struct list_head {
+	struct list_head *next, *prev;
+} List;
+
 typedef struct {
+	List list;
 	enum mode regular_mode;
 	enum stage regular_stage[2];
 	enum mode series_mode;
