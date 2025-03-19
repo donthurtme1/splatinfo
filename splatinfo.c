@@ -1,15 +1,19 @@
 #include <cjson/cJSON.h>
+#include <error.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
+#include <sys/select.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include "types.h"
+
+#define FRAME_TIME 50000000
 
 static struct termios term;
 static struct winsize winsize;
@@ -32,6 +36,7 @@ static const MapMode fav_stages[] = {
 	{ AREA, MARLIN_AIRPORT },
 
 	/* Clams */
+	{ CLAM, HAGGLEFISH_MARKET },
 	{ CLAM, UMAMI_RUINS },
 	{ CLAM, MUSEUM_D_ALFONSINO },
 	{ CLAM, INKBLOT_ART_ACADEMY },
@@ -39,7 +44,6 @@ static const MapMode fav_stages[] = {
 	{ CLAM, MAKOMART },
 	{ CLAM, MANTA_MARIA },
 	{ CLAM, CRABLEG_CAPITAL },
-	{ CLAM, SHIPSHAPE_CARGO_CO },
 	{ CLAM, ROBO_ROM_EN },
 
 	/* Tower */
@@ -150,23 +154,25 @@ initrotations(int *starthour) {
 	return 0;
 }
 
-/* [67bf58f8fe7e2087xxxxxxxx]  <- whole phaseid
- *                  ^~~~~~~~
- * This is the number stored in phaseid */
 int
-newrotation(uint32_t phaseid) {
-	int phaseid_len = 8 - (__builtin_clz(phaseid) >> 4); /* Length in nibbles */
-	char *query_str = malloc(sizeof "https://splatoon.oatmealdome.me/api/v1/three/versus/phase/normal/67bf58f8fe7e2087" + phaseid_len);
-	for (int i = 81 + phaseid_len; i > 81; i--) { /* Convert `phaseid` to a string appended to `query_str` */
-		if ((phaseid & 0x0000000f) >= 0 && (phaseid & 0x0000000f) <= 9) {
-			query_str[i] = (phaseid & 0x0000000f) + '0';
-			phaseid >>= 4;
-		} else {
-			query_str[i] = (phaseid & 0x0000000f) + 'a';
-			phaseid >>= 4;
+newrotation(PhaseId phaseid) {
+	char *query_str = malloc(sizeof "https://splatoon.oatmealdome.me/api/v1/three/versus/phase/normal/" + 24);
+	char *phase_str = malloc(25);
+
+	for (int i = 24; i > 0; i -= 8) {
+		for (int j = 8; j > 0; j--) {
+			if ((phaseid[i] & 0x0000000f) >= 0 && (phaseid[i] & 0x0000000f) <= 9) {
+				phase_str[i + j] = (phaseid[i] & 0x0000000f) + '0';
+				phaseid[i] >>= 4;
+			} else if ((phaseid[i] & 0x0000000f) >= 0x0a && (phaseid[i] & 0x0000000f) <= 0x0f) {
+				phase_str[i + j] = (phaseid[i] & 0x0000000f) + 'a';
+				phaseid[i] >>= 4;
+			}
+			phase_str[i + j] = phaseid[i] & 0x0000000f;
 		}
 	}
-	query_str[81 + phaseid_len] = '\0'; /* Append null terminator */
+	phase_str[24] = '\0';
+	strcpy(query_str + 65, phase_str);
 
 	/* Query oatmealdome using curl */
 	int oldstdin = dup(0);
@@ -180,6 +186,7 @@ newrotation(uint32_t phaseid) {
 	}
 	close(fds[1]);
 	dup2(fds[0], 0);
+	wait(NULL);
 
 	/* Move rotation head */
 	r_head = r_head->next;
@@ -202,6 +209,7 @@ query_oatmeal:
 	}
 	close(fds[1]);
 	dup2(fds[0], 0);
+	wait(NULL);
 
 	size_t len = 0;
 	char *curl_output = 0;
@@ -446,18 +454,22 @@ main(int argc, char *argv[]) {
 	}
 	fflush(stdout);
 
-	/* Main loop */
-	time_t unixtime = time(NULL);
-	int waittime = ((unixtime + 3600 % 3600) - unixtime) * 1000;
+	/* Initialise wait time */
+	struct timespec wait;
+	clock_gettime(CLOCK_MONOTONIC, &wait);
+	wait.tv_nsec -= (wait.tv_nsec % FRAME_TIME) + FRAME_TIME;
+	if (wait.tv_nsec > 1000000000) {
+		wait.tv_nsec %= 1000000000;
+		wait.tv_sec++;
+	}
 
-	static int idx = 0;
-	static int run = 1;
+	/* Main loop */
+	int idx = 0;
+	int run = 1;
 	while (run) {
 		static struct pollfd pollfds = { .fd = STDIN_FILENO, .events = POLLIN };
-		int polret = poll(&pollfds, 1, waittime);
-		if (polret > 0) {
-			register char c = getc(stdin);
-			switch (c) {
+		if (poll(&pollfds, 1, 0) > 0) {
+			switch (getc(stdin)) {
 				case 'j':
 					if (idx < 12 - rows)
 						idx++;
@@ -472,17 +484,25 @@ main(int argc, char *argv[]) {
 				default:
 					break;
 			}
-		} else if (polret == 0) {
+		}
+
+		time_t unixt = time(NULL);
+		if (unixt % 7200 == 0) { /* Check if next rotation */
 			fill_rotation_structs(rotation_data, &starthour);
-			waittime = 900000; // Check every 15 minutes
-		} else {
-			perror("poll");
 		}
 
 		for (int i = 0; i < rows; i++) {
 			print_rotation_box(winsize.ws_col, idx + i, i, (idx + i) * 2 + starthour);
 		}
 		fflush(stdout);
+
+		struct timespec rem;
+		int nsleep = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wait, &rem);
+		wait.tv_nsec += FRAME_TIME;
+		if (wait.tv_nsec > 1000000000) {
+			wait.tv_nsec %= 1000000000;
+			wait.tv_sec++;
+		}
 	}
 
 	printf("\e[%dB", rows * 10 - 1);

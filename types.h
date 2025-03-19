@@ -1,6 +1,8 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <stdint.h>
+
 enum mode {
 	TURF = 1,
 	RAIN,
@@ -76,16 +78,23 @@ static const char *stage_str[] = {
 };
 
 #define container_of(ptr, type, member) \
-	(type *)((char *)ptr - offsetof(type, member))
+	(type *)((unsigned long)ptr - offsetof(type, member))
 
 #define list_for_each(pos, type, head, member) \
 	for (type *pos = container_of((head)->next, type, member); \
 		 &pos->member != head; \
 		 pos = container_of(pos->member.next, type, member))
 
+#define list_for_each_entry(pos, type, head) \
+	for (type *pos = container_of(head, type, list); \
+		 ((unsigned long)pos + offsetof(type, list)) != NULL; \
+		 pos = container_of(pos->member.next, type, list))
+
 typedef struct list_head {
 	struct list_head *next, *prev;
 } List;
+
+typedef uint32_t PhaseId[3];
 
 typedef struct {
 	List list;
