@@ -36,7 +36,8 @@ enum stage {
 	ROBO_ROM_EN,
 	BLUEFIN_DEPOT,
 	MARLIN_AIRPORT,
-	LEMIURA_HUB
+	LEMIURA_HUB,
+	URCHIN_UNDERPASS = 26
 };
 
 static const char *mode_str[] = {
@@ -74,7 +75,9 @@ static const char *stage_str[] = {
 	"Robo ROM-en",
 	"Bluefin Depot",
 	"Marlin Airport",
-	"Lemiura Hub"
+	"Lemiura Hub",
+	"(null)",
+	"Urchin Underpass"
 };
 
 #define container_of(ptr, type, member) \

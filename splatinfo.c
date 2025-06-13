@@ -34,6 +34,7 @@ static const MapMode fav_stages[] = {
 	{ AREA, CRABLEG_CAPITAL },
 	{ AREA, ROBO_ROM_EN },
 	{ AREA, MARLIN_AIRPORT },
+	{ AREA, URCHIN_UNDERPASS },
 
 	/* Clams */
 	{ CLAM, HAGGLEFISH_MARKET },
@@ -45,6 +46,7 @@ static const MapMode fav_stages[] = {
 	{ CLAM, MANTA_MARIA },
 	{ CLAM, CRABLEG_CAPITAL },
 	{ CLAM, ROBO_ROM_EN },
+	{ CLAM, URCHIN_UNDERPASS },
 
 	/* Tower */
 	{ LIFT, HAGGLEFISH_MARKET },
@@ -53,32 +55,30 @@ static const MapMode fav_stages[] = {
 	{ LIFT, MAKOMART },
 	{ LIFT, ROBO_ROM_EN },
 	{ LIFT, MARLIN_AIRPORT },
+	{ LIFT, URCHIN_UNDERPASS },
 
 	/* Rain */
 	{ RAIN, UNDERTOW_SPILLWAY },
 	{ RAIN, MUSEUM_D_ALFONSINO },
 	{ RAIN, MAKOMART },
 	{ RAIN, ROBO_ROM_EN },
+	{ RAIN, URCHIN_UNDERPASS },
 };
 
 static inline enum mode
 str_to_mode_enum(const char *mode) {
-	switch (mode[0]) {
-		case 'P':
-			return TURF;
-		case 'R':
-			return RAIN;
-		case 'A':
-			return AREA;
-		case 'L':
-			return LIFT;
-		case 'C':
-			return CLAM;
-		default:
-			__builtin_unreachable();
-	}
+	if (strcmp(mode, "Paint") == 0)
+		return TURF;
+	else if (strcmp(mode, "Goal") == 0)
+		return RAIN;
+	else if (strcmp(mode, "Area") == 0)
+		return AREA;
+	else if (strcmp(mode, "Lift") == 0)
+		return LIFT;
+	else if (strcmp(mode, "Clam") == 0)
+		return CLAM;
 
-	return 0;
+	__builtin_unreachable();
 }
 
 /* Populate structs pointed to by `rotations` with up to 12 rotations from oatmealdome.me */
