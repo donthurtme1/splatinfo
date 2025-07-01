@@ -65,8 +65,17 @@ static const MapMode fav_stages[] = {
 	{ RAIN, URCHIN_UNDERPASS },
 };
 
+void
+get_terminal_cursor_position(int *row, int *column)
+{
+	printf("\e[6n");
+	fflush(stdout);
+	scanf("\e[%d;%dR", row, column);
+}
+
 static inline enum mode
-str_to_mode_enum(const char *mode) {
+str_to_mode_enum(const char *mode)
+{
 	if (strcmp(mode, "Paint") == 0)
 		return TURF;
 	else if (strcmp(mode, "Goal") == 0)
@@ -83,7 +92,8 @@ str_to_mode_enum(const char *mode) {
 
 /* Populate structs pointed to by `rotations` with up to 12 rotations from oatmealdome.me */
 int
-initrotations(int *starthour) {
+initrotations(int *starthour)
+{
 	/* Query oatmealdome using curl */
 	int oldstdin = dup(0);
 	int fds[2];
@@ -155,7 +165,8 @@ initrotations(int *starthour) {
 }
 
 int
-newrotation(PhaseId phaseid) {
+newrotation(PhaseId phaseid)
+{
 	char *query_str = malloc(sizeof "https://splatoon.oatmealdome.me/api/v1/three/versus/phase/normal/" + 24);
 	char *phase_str = malloc(25);
 
@@ -195,7 +206,8 @@ newrotation(PhaseId phaseid) {
 }
 
 void
-fill_rotation_structs(Rotation *restrict rotation_array, int *starthour) {
+fill_rotation_structs(Rotation *restrict rotation_array, int *starthour)
+{
 	/* Start child to call curl */
 	int oldstdin = dup(0);
 	int fds[2];
@@ -264,7 +276,8 @@ query_oatmeal:
 }
 
 void
-print_anarchy_rotation(int width, int idx) {
+print_anarchy_rotation(int width, int idx)
+{
 	/* Save cursor position */
 	fwrite("\e[s", 3, sizeof(char), stdout);
 
@@ -305,7 +318,8 @@ print_anarchy_rotation(int width, int idx) {
 }
 
 void
-print_turf_x_rotation(int width, int idx) {
+print_turf_x_rotation(int width, int idx)
+{
 	/* Check width and height are greater than minimum */
 	/* TODO */
 
@@ -340,17 +354,13 @@ print_turf_x_rotation(int width, int idx) {
 }
 
 void
-print_rotation_box(int width, int idx, int row, int starttime) {
-	/* Check width and height are greater than minimum */
-	/* TODO */
-
-	/* Create enough space for the whole box */
-	for (int i = 0; i < 10 * (row + 1) - 1; i++)
-		putc('\n', stdout);
-	printf("\e[%dA", 9);
-
+print_rotation_box(int top_row_position, int width, int idx, int row, int start_time)
+{
 	/* Save cursor position (top left of rotation box) */
 	fwrite("\e[s", 3, sizeof(char), stdout);
+
+	/* Move cursor to correct position depending on current row */
+	printf("\e[%dH", row * 10 + top_row_position);
 
 	/* Print title and top of rotation box */
 	char *titlestr;
@@ -374,17 +384,17 @@ print_rotation_box(int width, int idx, int row, int starttime) {
 	}
 
 	int timestrlen = 16;
-	starttime %= 24;
-	if (starttime >= 8) timestrlen++;
-	if (starttime >= 10) timestrlen++;
-	if (starttime >= 22) timestrlen--;
+	start_time %= 24;
+	if (start_time >= 8) timestrlen++;
+	if (start_time >= 10) timestrlen++;
+	if (start_time >= 22) timestrlen--;
 	printf("\e[9%dm┌─┐ %s\e[37m: \e[9%dm┌", boxcolour, titlestr, boxcolour);
 	for (int i = 0; i < width - 8 - timestrlen - strlen(titlestr); i++)
 		printf("─");
 	if (idx == 0)
-		printf("┐ \e[97m%d:00 \e[37m- \e[97m%d:00 \e[9%dm┌─┐", starttime, (starttime + 2) % 24, boxcolour);
+		printf("┐ \e[97m%d:00 \e[37m- \e[97m%d:00 \e[9%dm┌─┐\n", start_time, (start_time + 2) % 24, boxcolour);
 	else
-		printf("┐ \e[37m%d:00 - %d:00 \e[9%dm┌─┐", starttime, (starttime + 2) % 24, boxcolour);
+		printf("┐ \e[37m%d:00 - %d:00 \e[9%dm┌─┐\n", start_time, (start_time + 2) % 24, boxcolour);
 
 	/* Print sides of rotation box */
 	for (int i = 0; i < 8; i++) {
@@ -399,58 +409,48 @@ print_rotation_box(int width, int idx, int row, int starttime) {
 		printf("─");
 	printf("┘");
 
-	/* Cursor position back to top left of box and print contents of box */
+	/*
+	 * Cursor position back to top left of box and print contents of box
+	 */
+	printf("\e[%dH", row * 10 + top_row_position);
+	print_anarchy_rotation(width, idx);
+	print_turf_x_rotation(width, idx);
 	fwrite("\e[u", 3, sizeof(char), stdout);
-	print_anarchy_rotation(winsize.ws_col, idx);
-	print_turf_x_rotation(winsize.ws_col, idx);
-	if (row > 0)
-		printf("\e[%dA", 10 * row);
 }
 
 int
-main(int argc, char *argv[]) {
-	/* Initialise stuff */
-	static int rows = 2;
-	if (argc > 1) {
-		int i = 0;
-		for (; argv[i] != NULL; i++) {
-			int j = 0;
-			for (; j < strlen(argv[i]); j++) {
-				if (argv[i][j] <= '0' || argv[i][j] >= '9') {
-					break;
-				}
-			}
-			if (j == strlen(argv[i])) {
-				break;
-			}
-		}
-		if (argv[i] != NULL) {
-			rows = 0;
-			for (int j = 0; j < strlen(argv[i]); j++) {
-				rows *= 10;
-				rows += argv[i][j] - '0';
-			}
-			if (rows > 12)
-				rows = 12;
-			else if (rows < 1)
-				rows = 1;
-		}
-	}
-
+main(int argc, char *argv[])
+{
+	/*
+	 * Initialise stuff
+	 */
 	tcgetattr(STDIN_FILENO, &term);
 	struct termios tmp = term;
 	tmp.c_lflag &= ~(ICANON | ECHO);
 	tcsetattr(STDIN_FILENO, 0, &tmp);
-
 	printf("\e[?25l"); // Hide cursor
+
+	/* Create enough space for at least 1 rotation */
+	for (int i = 1; i < 10; i++)
+		putc('\n', stdout);
+	printf("\e[%dA", 9);
+
+	int initial_row, initial_column;
+	get_terminal_cursor_position(&initial_row, &initial_column);
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
+	winsize.ws_row -= initial_row - 1;
+	winsize.ws_col = (winsize.ws_col * 2) / 3;
+
+	/* Calculate how many rotations can fit in the given space */
+	int num_rows = winsize.ws_row / 10;
 
 	/* Parse rotation data */
-	static int starthour;
-	fill_rotation_structs(rotation_data, &starthour);
+	static int utc_starthour;
+	fill_rotation_structs(rotation_data, &utc_starthour);
+	utc_starthour++; /* TODO: Account for timezone properly */
 
-	for (int i = 0; i < rows; i++) {
-		print_rotation_box(winsize.ws_col, i, i, i * 2 + starthour);
+	for (int i = 0; i < num_rows; i++) {
+		print_rotation_box(initial_row, winsize.ws_col, i, i, i * 2 + utc_starthour);
 	}
 	fflush(stdout);
 
@@ -471,7 +471,7 @@ main(int argc, char *argv[]) {
 		if (poll(&pollfds, 1, 0) > 0) {
 			switch (getc(stdin)) {
 				case 'j':
-					if (idx < 12 - rows)
+					if (idx < 12 - num_rows)
 						idx++;
 					break;
 				case 'k':
@@ -488,11 +488,11 @@ main(int argc, char *argv[]) {
 
 		time_t unixt = time(NULL);
 		if (unixt % 7200 == 0) { /* Check if next rotation */
-			fill_rotation_structs(rotation_data, &starthour);
+			fill_rotation_structs(rotation_data, &utc_starthour);
 		}
 
-		for (int i = 0; i < rows; i++) {
-			print_rotation_box(winsize.ws_col, idx + i, i, (idx + i) * 2 + starthour);
+		for (int i = 0; i < num_rows; i++) {
+			print_rotation_box(initial_row, winsize.ws_col, idx + i, i, (idx + i) * 2 + utc_starthour);
 		}
 		fflush(stdout);
 
@@ -505,7 +505,7 @@ main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("\e[%dB", rows * 10 - 1);
+	printf("\e[%dB", num_rows * 10 - 1);
 	printf("\e[?25h\n"); // Show cursor
 	tcsetattr(STDIN_FILENO, 0, &term);
 
