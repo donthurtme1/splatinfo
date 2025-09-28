@@ -497,7 +497,7 @@ main(int argc, char *argv[])
 		fflush(stdout);
 
 		struct timespec rem;
-		int nsleep = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wait, &rem);
+		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wait, &rem);
 		wait.tv_nsec += FRAME_TIME;
 		if (wait.tv_nsec > 1000000000) {
 			wait.tv_nsec %= 1000000000;
